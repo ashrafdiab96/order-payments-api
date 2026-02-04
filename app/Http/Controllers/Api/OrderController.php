@@ -128,4 +128,25 @@ class OrderController extends Controller
             'order' => $order->load('items')
         ]);
     }
+
+    public function destroy(int $orderId): JsonResponse
+    {
+        $order = Order::with('payments')->find($orderId);
+
+        if (! $order) {
+            return response()->json([
+                'message' => 'Order not found.'
+            ], 404);
+        }
+
+        if ($order->payments()->exists()) {
+            return response()->json([
+                'message' => 'Order cannot be deleted because payments exist.'
+            ], 409);
+        }
+
+        $order->delete();
+
+        return response()->json(null, 204);
+    }
 }
