@@ -1,0 +1,69 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\Order;
+use App\Models\OrderItem;
+use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+
+class OrderController extends Controller
+{
+    public function index(Request $request): JsonResponse
+    {
+        $orders = Order::with('items', 'payments')
+            ->when($request->status, function ($query, $status) {
+                $query->where('status', $status);
+            })
+            ->latest()
+            ->paginate(10);
+
+        return response()->json($orders);
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_name' => ['required', 'string'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        return DB::transaction(function () use ($validated) {
+
+            $order = Order::create([
+                'status' => Order::STATUS_PENDING,
+                'total_amount' => 0,
+            ]);
+
+            $total = 0;
+
+            foreach ($validated['items'] as $item) {
+                $subtotal = $item['quantity'] * $item['unit_price'];
+
+                OrderItem::create([
+                    'order_id' => $order->id,
+                    'product_name' => $item['product_name'],
+                    'quantity' => $item['quantity'],
+                    'unit_price' => $item['unit_price'],
+                    'subtotal' => $subtotal,
+                ]);
+
+                $total += $subtotal;
+            }
+
+            $order->update([
+                'total_amount' => $total,
+            ]);
+
+            return response()->json([
+                'message' => 'Order created successfully',
+                'order' => $order->load('items'),
+            ], 201);
+        });
+    }
+}
